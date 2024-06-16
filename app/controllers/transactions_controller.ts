@@ -3,6 +3,7 @@ import { reformTransaction } from '#lib/reform_transaction'
 import Product from '#models/product'
 import TransactionItems from '#models/transaction_items'
 import Transactions from '#models/transactions'
+import env from '#start/env'
 import { validateCreateTransactions, validateTransactionStatus } from '#validators/transaction'
 import type { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db'
@@ -19,14 +20,6 @@ export default class TransactionsController {
       products.map((product) => product.id)
     )
 
-    // await db
-    //   .query()
-    //   .from('product')
-    //   .whereIn(
-    //     'id',
-    //     products.map((product) => product.id)
-    //   )
-
     if (productsFromDB.length === 0) {
       return response.status(403).send({ status: 'error', message: 'Products not found' })
     }
@@ -42,6 +35,47 @@ export default class TransactionsController {
       0
     )
 
+    const authString = btoa(env.get('MIDTRANS_SERVER_KEY') + ':')
+    const payload = {
+      transaction_details: {
+        order_id: transaction_id,
+        gross_amount,
+      },
+      item_details: productsFromDB.map((product) => ({
+        id: product.id,
+        price: product.price,
+        quantity: product.quantity,
+        name: product.name,
+      })),
+      customer_details: {
+        first_name: customer_name,
+        email: customer_email,
+      },
+      callbacks: {
+        finish: `${env.get('FRONT_END_URL')}/order-status?transaction_id=${transaction_id}`,
+        error: `${env.get('FRONT_END_URL')}/order-status?transaction_id=${transaction_id}`,
+        pending: `${env.get('FRONT_END_URL')}/order-status?transaction_id=${transaction_id}`,
+      },
+    }
+
+    const midtransRes = await fetch(`${env.get('MIDTRANS_APP_URL')}/snap/v1/transactions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': `Basic ${authString}`,
+      },
+      body: JSON.stringify(payload),
+    })
+
+    const data = (await midtransRes.json()) as { token: string; redirect_url: string }
+    if (midtransRes.status !== 201) {
+      return response.status(500).send({
+        status: 'error',
+        message: 'Failed to create transaction',
+      })
+    }
+
     await Promise.all([
       await Transactions.create({
         id: transaction_id,
@@ -49,8 +83,8 @@ export default class TransactionsController {
         status: 'PENDING_PAYMENT',
         customer_name,
         customer_email,
-        snap_token: null,
-        snap_redirect_url: null,
+        snap_token: data.token,
+        snap_redirect_url: data.redirect_url,
       }),
 
       await TransactionItems.createMany(
@@ -73,8 +107,8 @@ export default class TransactionsController {
         customer_name,
         customer_email,
         products: productsFromDB,
-        snap_token: null,
-        snap_redirect_url: null,
+        snap_token: data.token,
+        snap_redirect_url: data.redirect_url,
       },
     }
   }

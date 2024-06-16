@@ -28,4 +28,7 @@ export default await Env.create(new URL('../', import.meta.url), {
   DB_USER: Env.schema.string(),
   DB_PASSWORD: Env.schema.string.optional(),
   DB_DATABASE: Env.schema.string(),
+  MIDTRANS_SERVER_KEY: Env.schema.string(),
+  MIDTRANS_APP_URL: Env.schema.string(),
+  FRONT_END_URL: Env.schema.string(),
 })
